@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "properties": {
+    "name": { "type": "string" },
+    "age": { "type": "integer" },
+    "city": { "type": "string" },
+    "languages": { "type": "array", "items": { "type": "string" } },
+    "mood": { "enum": ["happy", "grumpy", "sleepy"] }
+  }
+}

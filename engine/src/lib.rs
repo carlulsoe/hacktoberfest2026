@@ -120,7 +120,7 @@ impl Engine {
 
     /// Which tokens may follow, given a JSON parser state. EOS is allowed only
     /// once the document is complete.
-    pub fn json_mask(&self, state: &json::JsonState) -> Vec<bool> {
+    pub fn json_mask(&self, schema: &json::Schema, state: &json::JsonState) -> Vec<bool> {
         (0..self.n_vocab() as u32)
             .map(|id| {
                 if self.is_eos(id) {
@@ -128,7 +128,7 @@ impl Engine {
                 } else if self.is_special(id) {
                     false
                 } else {
-                    self.token_bytes(id).is_some_and(|b| !b.is_empty() && state.accepts(b))
+                    self.token_bytes(id).is_some_and(|b| !b.is_empty() && state.accepts(schema, b))
                 }
             })
             .collect()

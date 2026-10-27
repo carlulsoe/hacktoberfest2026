@@ -1,11 +1,15 @@
 //! LLM X-ray: watch a model pick tokens one at a time, and meddle with it.
 //!
 //!   xray "Write a haiku about the borrow checker."
+//!   xray --schema person.json "Describe a person."   # j = schema mode
 
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use engine::{Engine, Rng, Sampling, json::JsonState};
+use engine::{
+    Engine, Rng, Sampling,
+    json::{JsonState, Schema},
+};
 use ratatui::{
     DefaultTerminal, Frame,
     crossterm::event::{self, Event, KeyCode, KeyEventKind},
@@ -45,6 +49,9 @@ struct App {
     steps: Vec<Step>,
     sampling: Sampling,
     json_mode: bool,
+    /// What JSON mode enforces: any object unless `--schema` was given.
+    schema: Schema,
+    has_schema: bool,
     json: JsonState,
     view: View,
     /// Raw logits behind `view`, used for sampling.
@@ -58,7 +65,7 @@ struct App {
 }
 
 impl App {
-    fn new(engine: Engine, prompt: String) -> Result<Self> {
+    fn new(engine: Engine, prompt: String, schema: Option<Schema>) -> Result<Self> {
         let empty = View { probs: vec![], mask: None, shown: vec![], allowed_mass: 1.0, entropy_bits: 0.0, millis: 0 };
         let mut app = Self {
             engine,
@@ -67,6 +74,8 @@ impl App {
             steps: vec![],
             sampling: Sampling::default(),
             json_mode: false,
+            has_schema: schema.is_some(),
+            schema: schema.unwrap_or_default(),
             json: JsonState::default(),
             view: empty,
             logits_cache: vec![],
@@ -99,7 +108,7 @@ impl App {
         let start = Instant::now();
         let logits = self.engine.logits(&self.sequence())?;
         let probs = engine::probs(&logits, self.sampling.temperature, None);
-        let mask = self.json_mode.then(|| self.engine.json_mask(&self.json));
+        let mask = self.json_mode.then(|| self.engine.json_mask(&self.schema, &self.json));
         let mut shown = engine::top_n(&probs, SHOWN);
         let mut allowed_mass = 1.0;
         if let Some(m) = &mask {
@@ -140,7 +149,7 @@ impl App {
         }
         if self.json_mode {
             for &b in self.engine.token_bytes(id).unwrap_or_default() {
-                self.json.feed(b);
+                self.json.feed(&self.schema, b);
             }
         }
         self.steps.push(Step { id, prob: self.view.probs[id as usize], forced: forced.is_some() });
@@ -160,7 +169,7 @@ impl App {
     fn replay_json(&self) -> Option<JsonState> {
         let mut s = JsonState::default();
         let ids: Vec<u32> = self.steps.iter().map(|s| s.id).collect();
-        self.engine.decode(&ids).bytes().all(|b| s.feed(b)).then_some(s)
+        self.engine.decode(&ids).bytes().all(|b| s.feed(&self.schema, b)).then_some(s)
     }
 
     fn toggle_json(&mut self) -> Result<()> {
@@ -170,7 +179,7 @@ impl App {
             self.json = s;
             self.json_mode = true;
         } else {
-            self.message = "Text so far isn't the start of a JSON object; undo or restart first.".into();
+            self.message = "Text so far doesn't fit the JSON constraint; undo or restart first.".into();
             return Ok(());
         }
         self.refresh()
@@ -292,7 +301,7 @@ fn draw(f: &mut Frame, app: &App) {
             let p = v.probs[id];
             let allowed = v.mask.as_ref().is_none_or(|m| m[id]);
             let token = if app.engine.is_eos(id as u32) {
-                "⏹ <end>".to_string()
+                format!("⏹ {}", app.engine.token_text(id as u32))
             } else {
                 format!("{:?}", visible(&app.engine.token_text(id as u32))).trim_matches('"').to_string()
             };
@@ -318,7 +327,11 @@ fn draw(f: &mut Frame, app: &App) {
 
     // Settings and stats.
     let s = app.sampling;
-    let mode = if app.json_mode { Span::styled("JSON (constrained)", Style::new().fg(Color::Yellow).bold()) } else { Span::raw("free") };
+    let mode = match (app.json_mode, app.has_schema) {
+        (false, _) => Span::raw("free"),
+        (true, false) => Span::styled("JSON (constrained)", Style::new().fg(Color::Yellow).bold()),
+        (true, true) => Span::styled("JSON schema (constrained)", Style::new().fg(Color::Yellow).bold()),
+    };
     let mut info = vec![
         Line::from(vec![Span::raw("mode         "), mode]),
         Line::from(format!("temperature  {:.1}{}", s.temperature, if s.temperature == 0.0 { " (greedy)" } else { "" })),
@@ -360,14 +373,20 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let (model_dir, prompt) = match args.as_slice() {
-        [flag, dir, rest @ ..] if flag == "--model-dir" => (dir.clone(), rest.join(" ")),
-        rest => (engine::DEFAULT_MODEL_DIR.to_string(), rest.join(" ")),
-    };
-    let prompt = if prompt.is_empty() { DEFAULT_PROMPT.to_string() } else { prompt };
+    let mut args = std::env::args().skip(1);
+    let mut model_dir = engine::DEFAULT_MODEL_DIR.to_string();
+    let mut schema = None;
+    let mut words = vec![];
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--model-dir" => model_dir = args.next().unwrap_or_default(),
+            "--schema" => schema = Some(Schema::parse(&std::fs::read_to_string(args.next().unwrap_or_default())?)?),
+            _ => words.push(a),
+        }
+    }
+    let prompt = if words.is_empty() { DEFAULT_PROMPT.to_string() } else { words.join(" ") };
     eprintln!("loading model…");
-    let mut app = App::new(Engine::load(&model_dir)?, prompt)?;
+    let mut app = App::new(Engine::load(&model_dir)?, prompt, schema)?;
     let mut terminal = ratatui::init();
     let result = run(&mut terminal, &mut app);
     ratatui::restore();

@@ -4,12 +4,13 @@
 //! tweak/mask the logits, pick a token, push it, repeat.
 
 pub mod json;
+mod qwen2;
 
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow};
 use candle_core::{Device, Tensor, quantized::gguf_file};
-use candle_transformers::models::quantized_qwen2::ModelWeights;
+use qwen2::ModelWeights;
 use tokenizers::Tokenizer;
 
 pub const DEFAULT_MODEL_DIR: &str = "models";
@@ -77,18 +78,15 @@ impl Engine {
         Ok(enc.get_ids().to_vec())
     }
 
-    /// Logits for the token after `tokens`. Reuses the KV cache when `tokens`
-    /// extends what was evaluated last time; otherwise re-runs from scratch
-    /// (that's how undo / forcing a different token works).
+    /// Logits for the token after `tokens`. Only the part after the longest
+    /// prefix shared with the previous call is evaluated, so stepping, undo and
+    /// forcing a different token each cost about one token.
     pub fn logits(&mut self, tokens: &[u32]) -> Result<Vec<f32>> {
-        let reuse = tokens.len() > self.cached.len() && tokens.starts_with(&self.cached);
-        if !reuse {
-            self.model.clear_kv_cache();
-            self.cached.clear();
-        }
-        let new = &tokens[self.cached.len()..];
-        let input = Tensor::new(new, &self.device)?.unsqueeze(0)?;
-        let logits = self.model.forward(&input, self.cached.len())?;
+        let shared = tokens.iter().zip(&self.cached).take_while(|(a, b)| a == b).count();
+        // At least one token must go through the model to produce logits.
+        let keep = shared.min(tokens.len() - 1);
+        let input = Tensor::new(&tokens[keep..], &self.device)?.unsqueeze(0)?;
+        let logits = self.model.forward(&input, keep)?;
         self.cached = tokens.to_vec();
         Ok(logits.squeeze(0)?.to_vec1::<f32>()?)
     }

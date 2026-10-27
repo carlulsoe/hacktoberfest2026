@@ -594,9 +594,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "candle-core",
+ "candle-nn",
  "candle-transformers",
  "serde_json",
  "tokenizers 0.23.2",
+ "tracing",
 ]
 
 [[package]]

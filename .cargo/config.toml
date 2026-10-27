@@ -1,0 +1,3 @@
+# Let candle use AVX/FMA etc. on this machine's CPU.
+[build]
+rustflags = ["-C", "target-cpu=native"]

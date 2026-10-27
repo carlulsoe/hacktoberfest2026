@@ -77,3 +77,7 @@ Make one for any prompt and schema:
 cargo test --release -p engine                 # parser and schema
 cargo test --release -p engine -- --ignored    # KV-cache rewind; needs models/
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE). `engine/src/qwen2.rs` is adapted from [candle](https://github.com/huggingface/candle) (MIT/Apache-2.0).

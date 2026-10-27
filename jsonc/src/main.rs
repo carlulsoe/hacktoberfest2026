@@ -4,8 +4,11 @@
 //!   jsonc "Maria is 34 and lives in Aarhus."                 # free vs JSON
 //!   jsonc --schema person.json "Maria is 34 and lives in Aarhus."
 //!   jsonc --bench                                            # all three over a prompt set
+//!   jsonc --schema schemas/order.json --demo demo/order.html "Order #4471: ..."
 
 use std::time::Instant;
+
+use serde_json::{Value, json};
 
 use anyhow::{Result, bail};
 use engine::{
@@ -65,7 +68,10 @@ struct Outcome {
     /// Steps where the model's favourite token was masked out.
     interventions: usize,
     secs: f32,
-    parsed: Option<serde_json::Value>,
+    parsed: Option<Value>,
+    /// Per step: chosen token, the model's top candidates, and whether the
+    /// mask overrode its favourite. Feeds the HTML demo.
+    steps: Vec<Value>,
 }
 
 impl Outcome {
@@ -89,14 +95,33 @@ fn generate(engine: &mut Engine, prompt: &[u32], constraint: Option<&Schema>, s:
     let mut seq = prompt.to_vec();
     let mut state = JsonState::default();
     let mut interventions = 0;
+    let mut steps = Vec::new();
     for _ in 0..max {
         let logits = engine.logits(&seq)?;
         let mask = constraint.map(|schema| engine.json_mask(schema, &state));
-        if let Some(m) = &mask {
-            let favourite = engine::top_n(&logits, 1)[0];
-            interventions += !m[favourite] as usize;
-        }
+        let allowed = |i: usize| mask.as_ref().is_none_or(|m| m[i]);
+        let favourite = engine::top_n(&logits, 1)[0];
+        let overridden = !allowed(favourite);
+        interventions += overridden as usize;
         let id = engine::sample(&logits, s, mask.as_deref(), &mut rng);
+
+        let probs = engine::probs(&logits, 1.0, None);
+        // Rounded: keeps the embedded demo trace small.
+        let p = |i: usize| (probs[i] as f64 * 1e4).round() / 1e4;
+        let label = |i: usize| if engine.is_eos(i as u32) { "⏹ end".to_string() } else { engine.token_text(i as u32) };
+        let candidates: Vec<Value> = engine::top_n(&probs, 5)
+            .into_iter()
+            .filter(|&i| p(i) >= 0.001)
+            .map(|i| json!({ "text": label(i), "p": p(i), "allowed": allowed(i) }))
+            .collect();
+        let mut step = json!({ "text": label(id as usize), "p": p(id as usize), "candidates": candidates });
+        if engine.is_eos(id) {
+            step["end"] = json!(true);
+        }
+        if overridden {
+            step["wanted"] = json!(label(favourite));
+        }
+        steps.push(step);
         if engine.is_eos(id) {
             break;
         }
@@ -110,7 +135,7 @@ fn generate(engine: &mut Engine, prompt: &[u32], constraint: Option<&Schema>, s:
     let generated = &seq[prompt.len()..];
     let text = engine.decode(generated);
     let parsed = serde_json::from_str(&text).ok();
-    Ok(Outcome { text, tokens: generated.len(), interventions, secs: start.elapsed().as_secs_f32(), parsed })
+    Ok(Outcome { text, tokens: generated.len(), interventions, secs: start.elapsed().as_secs_f32(), parsed, steps })
 }
 
 fn report(label: &str, o: &Outcome, schema: Option<&Schema>) {
@@ -129,10 +154,36 @@ fn report(label: &str, o: &Outcome, schema: Option<&Schema>) {
     println!("{}\n", o.text.trim_end());
 }
 
-/// A schema given inline (`{...}`) or as a file path.
-fn load_schema(arg: &str) -> Result<Schema> {
+/// A schema given inline (`{...}`) or as a file path, with its source text.
+fn load_schema(arg: &str) -> Result<(Schema, String)> {
     let text = if arg.trim_start().starts_with('{') { arg.to_string() } else { std::fs::read_to_string(arg)? };
-    Schema::parse(&text)
+    Ok((Schema::parse(&text)?, text))
+}
+
+/// Write a self-contained HTML replay of the three runs.
+fn write_demo(path: &str, prompt: &str, schema_text: &str, schema: &Schema, runs: &[(&str, &Outcome)]) -> Result<()> {
+    let runs: Vec<Value> = runs
+        .iter()
+        .map(|(mode, o)| {
+            let verdict = match (&o.parsed, o.matches(schema)) {
+                (_, true) => "match",
+                (Some(_), false) => "shape",
+                (None, _) => "invalid",
+            };
+            json!({ "mode": mode, "verdict": verdict, "interventions": o.interventions, "steps": o.steps })
+        })
+        .collect();
+    let schema_value: Value = serde_json::from_str(schema_text)?;
+    let trace = json!({ "prompt": prompt, "schema": schema_value, "runs": runs });
+    // `</` inside a <script> block would end it early.
+    let trace = serde_json::to_string(&trace)?.replace("</", "<\\/");
+    let html = include_str!("demo.html").replace("/*TRACE*/null", &trace);
+    if let Some(dir) = std::path::Path::new(path).parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(path, html)?;
+    println!("wrote {path}");
+    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -142,6 +193,7 @@ fn main() -> Result<()> {
     let mut model_dir = engine::DEFAULT_MODEL_DIR.to_string();
     let mut bench = false;
     let mut schema = None;
+    let mut demo = None;
     let mut prompt = None;
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -149,9 +201,10 @@ fn main() -> Result<()> {
             "--max" => max = args.next().unwrap_or_default().parse()?,
             "--model-dir" => model_dir = args.next().unwrap_or_default(),
             "--schema" => schema = Some(load_schema(&args.next().unwrap_or_default())?),
+            "--demo" => demo = args.next(),
             "--bench" => bench = true,
             "-h" | "--help" => {
-                println!("usage: jsonc [--temp T] [--max N] [--model-dir DIR] (--bench | [--schema FILE|JSON] PROMPT)");
+                println!("usage: jsonc [--temp T] [--max N] [--model-dir DIR] (--bench | [--schema FILE|JSON [--demo OUT.html]] PROMPT)");
                 return Ok(());
             }
             _ => prompt = Some(a),
@@ -197,11 +250,21 @@ fn main() -> Result<()> {
     }
 
     let Some(prompt) = prompt else { bail!("give a prompt or --bench (see --help)") };
+    if demo.is_some() && schema.is_none() {
+        bail!("--demo needs --schema");
+    }
     let ids = engine.chat_prompt(SYSTEM, &prompt)?;
-    report("free", &generate(&mut engine, &ids, None, sampling, max, 1)?, schema.as_ref());
-    report("json", &generate(&mut engine, &ids, Some(&any_object), sampling, max, 1)?, schema.as_ref());
-    if let Some(schema) = &schema {
-        report("schema", &generate(&mut engine, &ids, Some(schema), sampling, max, 1)?, Some(schema));
+    let schema_ref = schema.as_ref().map(|(s, _)| s);
+    let free = generate(&mut engine, &ids, None, sampling, max, 1)?;
+    report("free", &free, schema_ref);
+    let json = generate(&mut engine, &ids, Some(&any_object), sampling, max, 1)?;
+    report("json", &json, schema_ref);
+    if let Some((schema, schema_text)) = &schema {
+        let constrained = generate(&mut engine, &ids, Some(schema), sampling, max, 1)?;
+        report("schema", &constrained, Some(schema));
+        if let Some(path) = &demo {
+            write_demo(path, &prompt, schema_text, schema, &[("free", &free), ("json", &json), ("schema", &constrained)])?;
+        }
     }
     Ok(())
 }

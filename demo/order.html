@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>One prompt, three ways to decode it</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --film: #e8edf1;
+    --sheet: #f6f8fa;
+    --ink: #15233b;
+    --graphite: #5e6c7e;
+    --line: #c9d2dc;
+    --blocked: #c4352b;
+    --allowed: #1e7466;
+    --marker: #f2d04b;
+    --sans: "Instrument Sans", system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--film);
+    color: var(--ink);
+    font: 16px/1.5 var(--sans);
+  }
+  .page { max-width: 1480px; margin: 0 auto; padding: 48px 40px 32px; }
+
+  /* The prompt is the hero. */
+  .prompt {
+    margin: 0;
+    max-width: 30ch;
+    font-size: clamp(1.7rem, 3.2vw, 2.9rem);
+    line-height: 1.15;
+    font-weight: 600;
+    letter-spacing: -0.015em;
+    text-indent: -0.42em;
+  }
+  .lede { margin: 18px 0 0; max-width: 62ch; color: var(--graphite); font-size: 1.08rem; }
+
+  .stage {
+    display: grid;
+    grid-template-columns: minmax(230px, 0.75fr) repeat(3, minmax(0, 1fr));
+    column-gap: 20px;
+    margin-top: 40px;
+  }
+  h2 { margin: 0; font-size: 1.05rem; font-weight: 600; }
+  .rule { margin: 2px 0 14px; color: var(--graphite); font-size: 0.92rem; }
+
+  /* Schema: a drawing, not a card. */
+  .schema { padding-top: 2px; grid-row: span 5; }
+  .schema ol { list-style: none; margin: 0; padding: 0 0 0 14px; border-left: 1px solid var(--line); }
+  .schema > ol { padding-left: 0; border: 0; }
+  .schema li { margin: 3px 0; font: 0.88rem/1.5 var(--mono); }
+  .schema .key { padding: 1px 4px; border-radius: 3px; transition: background 0.15s; }
+  .schema .key.now { background: var(--marker); }
+  .schema .type { color: var(--graphite); }
+
+  .lane {
+    background: var(--sheet);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 18px 18px 16px;
+    min-width: 0;
+    display: grid;
+    grid-row: span 5;
+    grid-template-rows: subgrid;
+    row-gap: 0;
+  }
+  .lane.flash { animation: flash 0.6s ease-out; }
+  @keyframes flash { from { box-shadow: 0 0 0 4px var(--marker); } to { box-shadow: 0 0 0 4px transparent; } }
+
+  .out {
+    min-height: 19rem;
+    margin: 0;
+    padding: 14px 0 0;
+    border-top: 1px solid var(--line);
+    font: 0.92rem/2.05 var(--mono);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .tok { border-radius: 2px; cursor: default; }
+  .tok:hover, .tok.inspect { background: rgba(21, 35, 59, 0.1); }
+  .tok.new { animation: arrive 0.35s ease-out; }
+  @keyframes arrive { from { background: rgba(30, 116, 102, 0.25); } to { background: transparent; } }
+  ruby { ruby-position: over; }
+  ruby .got { background: var(--marker); padding: 0 1px; border-radius: 2px; }
+  rt { font: 600 0.7rem/1 var(--mono); color: var(--blocked); text-decoration: line-through; text-decoration-thickness: 2px; }
+  .caret { display: inline-block; width: 0.55em; height: 1.1em; vertical-align: -0.2em; background: var(--ink); animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .cands { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); min-height: 9.6rem; }
+  .cands p { margin: 0 0 6px; color: var(--graphite); font-size: 0.85rem; }
+  .cand { display: grid; grid-template-columns: 7.5rem 1fr 3.4rem; gap: 8px; align-items: center; font: 0.8rem/1.75 var(--mono); }
+  .cand .t { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .cand .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+  .cand .bar i { display: block; height: 100%; background: var(--allowed); }
+  .cand .pct { text-align: right; color: var(--graphite); }
+  .cand.blocked .t { color: var(--blocked); text-decoration: line-through; }
+  .cand.blocked .bar i { background: var(--blocked); opacity: 0.45; }
+  .cand.chosen .t { font-weight: 600; }
+  .cand.chosen .t::before { content: "✓ "; color: var(--allowed); }
+
+  .verdict { margin: 12px 0 0; font-weight: 600; min-height: 1.5em; }
+  .verdict.invalid { color: var(--blocked); }
+  .verdict.shape { color: #8a5a00; }
+  .verdict.match { color: var(--allowed); }
+  .verdict small { display: block; font-weight: 400; color: var(--graphite); }
+
+  .transport {
+    position: sticky; bottom: 0;
+    display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+    margin-top: 28px; padding: 14px 0;
+    background: var(--film);
+    border-top: 1px solid var(--line);
+  }
+  button, select {
+    font: 500 0.95rem var(--sans);
+    color: var(--ink);
+    background: var(--sheet);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 7px 14px;
+    cursor: pointer;
+  }
+  button.primary { background: var(--ink); color: var(--sheet); border-color: var(--ink); min-width: 6.5rem; }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid var(--marker); outline-offset: 2px; }
+  input[type=range] { flex: 1; min-width: 160px; accent-color: var(--ink); }
+  .count { font-variant-numeric: tabular-nums; color: var(--graphite); min-width: 9ch; }
+  .legend { margin: 0; color: var(--graphite); font-size: 0.9rem; }
+  .legend s { color: var(--blocked); font: 600 0.8rem var(--mono); text-decoration-thickness: 2px; }
+  .legend mark { background: var(--marker); color: var(--ink); font: 0.8rem var(--mono); padding: 0 2px; }
+
+  /* Keep the three runs side by side as long as possible: the comparison is the point. */
+  @media (max-width: 1100px) {
+    .page { padding: 28px 0 16px; }
+    .stage { grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 12px; margin-top: 28px; }
+    .schema { grid-column: 1 / -1; grid-row: auto; margin-bottom: 20px; }
+    .schema > ol { columns: 2; column-gap: 32px; }
+    .lane { padding: 14px 12px 12px; }
+    .out { min-height: 17rem; font-size: 0.74rem; }
+    .cand { grid-template-columns: 4.4rem 1fr 2.9rem; gap: 6px; font-size: 0.7rem; }
+    .cands p { font-size: 0.78rem; }
+  }
+  @media (max-width: 640px) {
+    .page { padding: 20px 0; }
+    .stage { grid-template-columns: 1fr; row-gap: 12px; }
+    .schema > ol { columns: 1; }
+    .lane { display: block; }
+    .out { min-height: 0; font-size: 0.85rem; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .lane.flash, .tok.new, .caret { animation: none; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <h1 class="prompt" id="prompt"></h1>
+    <p class="lede">The same 0.5B model gets this prompt three times, on a laptop-class CPU. The weights, prompt and sampling are identical in every run. All that changes is which next tokens each run is allowed to pick.</p>
+  </header>
+
+  <main class="stage">
+    <aside class="schema">
+      <h2>The schema</h2>
+      <p class="rule">The third run has to produce exactly this</p>
+      <div id="schema"></div>
+    </aside>
+    <section class="lane" data-mode="free">
+      <h2>Free</h2>
+      <p class="rule">Every token is allowed</p>
+      <pre class="out"></pre><div class="cands"></div><p class="verdict"></p>
+    </section>
+    <section class="lane" data-mode="json">
+      <h2>Any JSON object</h2>
+      <p class="rule">Tokens must keep it valid JSON</p>
+      <pre class="out"></pre><div class="cands"></div><p class="verdict"></p>
+    </section>
+    <section class="lane" data-mode="schema">
+      <h2>This schema</h2>
+      <p class="rule">Tokens must fit the schema</p>
+      <pre class="out"></pre><div class="cands"></div><p class="verdict"></p>
+    </section>
+  </main>
+
+  <footer class="transport">
+    <button class="primary" id="play">Play</button>
+    <button id="back" aria-label="Previous token">◀ Step</button>
+    <button id="fwd" aria-label="Next token">Step ▶</button>
+    <input type="range" id="scrub" min="0" value="0" aria-label="Token position">
+    <span class="count" id="count"></span>
+    <select id="speed" aria-label="Playback speed">
+      <option value="400">Slow</option>
+      <option value="160" selected>Normal</option>
+      <option value="50">Fast</option>
+    </select>
+    <p class="legend"><s>```json</s> over <mark>{</mark> marks a step where the model wanted the struck-out token and the mask let it write the highlighted one. Hover any token to see its candidates.</p>
+  </footer>
+</div>
+
+<script>
+const TRACE = {"prompt":"Order #4471: 2x coffee, 1x croissant, paid by card. Return order id, items with quantities, and payment method.","schema":{"type":"object","properties":{"order_id":{"type":"integer"},"items":{"type":"array","items":{"type":"object","properties":{"name":{"type":"string"},"quantity":{"type":"integer"}}}},"payment_method":{"enum":["card","cash","mobile"]}}},"runs":[{"mode":"free","verdict":"invalid","interventions":0,"steps":[{"text":"```","p":0.7879,"candidates":[{"text":"```","p":0.7879,"allowed":true},{"text":"{\n","p":0.2053,"allowed":true},{"text":"{\"","p":0.006,"allowed":true}]},{"text":"json","p":0.9999,"candidates":[{"text":"json","p":0.9999,"allowed":true}]},{"text":"\n","p":1.0,"candidates":[{"text":"\n","p":1.0,"allowed":true}]},{"text":"{\n","p":0.989,"candidates":[{"text":"{\n","p":0.989,"allowed":true},{"text":"[\n","p":0.0105,"allowed":true}]},{"text":" ","p":0.949,"candidates":[{"text":" ","p":0.949,"allowed":true},{"text":"   ","p":0.0504,"allowed":true}]},{"text":" \"","p":0.9971,"candidates":[{"text":" \"","p":0.9971,"allowed":true},{"text":" \"_","p":0.0027,"allowed":true}]},{"text":"order","p":0.8151,"candidates":[{"text":"order","p":0.8151,"allowed":true},{"text":"return","p":0.1369,"allowed":true},{"text":"Order","p":0.0325,"allowed":true},{"text":"Return","p":0.0073,"allowed":true},{"text":"orderId","p":0.0012,"allowed":true}]},{"text":"_id","p":0.9233,"candidates":[{"text":"_id","p":0.9233,"allowed":true},{"text":"\":","p":0.0228,"allowed":true},{"text":"_number","p":0.0173,"allowed":true},{"text":"ID","p":0.0128,"allowed":true},{"text":"Id","p":0.0086,"allowed":true}]},{"text":"\":","p":0.9999,"candidates":[{"text":"\":","p":0.9999,"allowed":true}]},{"text":" \"","p":0.9843,"candidates":[{"text":" \"","p":0.9843,"allowed":true},{"text":" ","p":0.013,"allowed":true},{"text":" null","p":0.0012,"allowed":true}]},{"text":"4","p":0.953,"candidates":[{"text":"4","p":0.953,"allowed":true},{"text":"Order","p":0.0119,"allowed":true},{"text":"1","p":0.0065,"allowed":true},{"text":"ORDER","p":0.0053,"allowed":true},{"text":"8","p":0.0033,"allowed":true}]},{"text":"4","p":0.9961,"candidates":[{"text":"4","p":0.9961,"allowed":true},{"text":"5","p":0.0024,"allowed":true}]},{"text":"7","p":0.999,"candidates":[{"text":"7","p":0.999,"allowed":true}]},{"text":"1","p":0.9975,"candidates":[{"text":"1","p":0.9975,"allowed":true},{"text":"2","p":0.0018,"allowed":true}]},{"text":"\",\n","p":0.9981,"candidates":[{"text":"\",\n","p":0.9981,"allowed":true}]},{"text":" ","p":1.0,"candidates":[{"text":" ","p":1.0,"allowed":true}]},{"text":" \"","p":0.9999,"candidates":[{"text":" \"","p":0.9999,"allowed":true}]},{"text":"items","p":0.9781,"candidates":[{"text":"items","p":0.9781,"allowed":true},{"text":"order","p":0.0065,"allowed":true},{"text":"item","p":0.0051,"allowed":true},{"text":"total","p":0.0032,"allowed":true},{"text":"products","p":0.0019,"allowed":true}]},{"text":"\":","p":0.9371,"candidates":[{"text":"\":","p":0.9371,"allowed":true},{"text":"_with","p":0.0594,"allowed":true}]},{"text":" [\n","p":0.5356,"candidates":[{"text":" [\n","p":0.5356,"allowed":true},{"text":" {\n","p":0.4485,"allowed":true},{"text":" [{\"","p":0.0062,"allowed":true},{"text":" [\"","p":0.0034,"allowed":true},{"text":" [{\n","p":0.0019,"allowed":true}]},{"text":"   ","p":1.0,"candidates":[{"text":"   ","p":1.0,"allowed":true}]},{"text":" {\n","p":0.9322,"candidates":[{"text":" {\n","p":0.9322,"allowed":true},{"text":" {\"","p":0.0453,"allowed":true},{"text":" {","p":0.0211,"allowed":true}]},{"text":"     ","p":1.0,"candidates":[{"text":"     ","p":1.0,"allowed":true}]},{"text":" \"","p":1.0,"candidates":[{"text":" \"","p":1.0,"allowed":true}]},{"text":"quantity","p":0.2774,"candidates":[{"text":"quantity","p":0.2774,"allowed":true},{"text":"item","p":0.2568,"allowed":true},{"text":"product","p":0.232,"allowed":true},{"text":"name","p":0.1884,"allowed":true},{"text":"order","p":0.0061,"allowed":true}]},{"text":"\":","p":0.9994,"candidates":[{"text":"\":","p":0.9994,"allowed":true}]},{"text":" ","p":0.8492,"candidates":[{"text":" ","p":0.8492,"allowed":true},{"text":" \"","p":0.1502,"allowed":true}]},{"text":"2","p":0.945,"candidates":[{"text":"2","p":0.945,"allowed":true},{"text":"1","p":0.0514,"allowed":true},{"text":"4","p":0.0015,"allowed":true},{"text":"3","p":0.0011,"allowed":true}]},{"text":",\n","p":0.9527,"candidates":[{"text":",\n","p":0.9527,"allowed":true},{"text":"\n","p":0.047,"allowed":true}]},{"text":"     ","p":1.0,"candidates":[{"text":"     ","p":1.0,"allowed":true}]},{"text":" \"","p":1.0,"candidates":[{"text":" \"","p":1.0,"allowed":true}]},{"text":"item","p":0.577,"candidates":[{"text":"item","p":0.577,"allowed":true},{"text":"product","p":0.3127,"allowed":true},{"text":"name","p":0.0649,"allowed":true},{"text":"food","p":0.0056,"allowed":true},{"text":"description","p":0.0051,"allowed":true}]},{"text":"\":","p":0.605,"candidates":[{"text":"\":","p":0.605,"allowed":true},{"text":"_name","p":0.1805,"allowed":true},{"text":"_type","p":0.1705,"allowed":true},{"text":"_id","p":0.0341,"allowed":true},{"text":"_code","p":0.0017,"allowed":true}]},{"text":" \"","p":0.9492,"candidates":[{"text":" \"","p":0.9492,"allowed":true},{"text":" {\n","p":0.0472,"allowed":true}]},{"text":"coffee","p":0.9434,"candidates":[{"text":"coffee","p":0.9434,"allowed":true},{"text":"Coffee","p":0.03,"allowed":true},{"text":"co","p":0.0151,"allowed":true},{"text":"2","p":0.0069,"allowed":true}]},{"text":"\"\n","p":0.9159,"candidates":[{"text":"\"\n","p":0.9159,"allowed":true},{"text":"\",\n","p":0.0835,"allowed":true}]},{"text":"   ","p":1.0,"candidates":[{"text":"   ","p":1.0,"allowed":true}]},{"text":" },\n","p":0.9993,"candidates":[{"text":" },\n","p":0.9993,"allowed":true}]},{"text":"   ","p":1.0,"candidates":[{"text":"   ","p":1.0,"allowed":true}]},{"text":" {\n","p":0.9999,"candidates":[{"text":" {\n","p":0.9999,"allowed":true}]},{"text":"     ","p":1.0,"candidates":[{"text":"     ","p":1.0,"allowed":true}]},{"text":" \"","p":1.0,"candidates":[{"text":" \"","p":1.0,"allowed":true}]},{"text":"quantity","p":0.9985,"candidates":[{"text":"quantity","p":0.9985,"allowed":true},{"text":"item","p":0.0014,"allowed":true}]},{"text":"\":","p":1.0,"candidates":[{"text":"\":","p":1.0,"allowed":true}]},{"text":" ","p":1.0,"candidates":[{"text":" ","p":1.0,"allowed":true}]},{"text":"1","p":0.9996,"candidates":[{"text":"1","p":0.9996,"allowed":true}]},{"text":",\n","p":1.0,"candidates":[{"text":",\n","p":1.0,"allowed":true}]},{"text":"     ","p":1.0,"candidates":[{"text":"     ","p":1.0,"allowed":true}]},{"text":" \"","p":1.0,"candidates":[{"text":" \"","p":1.0,"allowed":true}]},{"text":"item","p":1.0,"candidates":[{"text":"item","p":1.0,"allowed":true}]},{"text":"\":","p":1.0,"candidates":[{"text":"\":","p":1.0,"allowed":true}]},{"text":" \"","p":1.0,"candidates":[{"text":" \"","p":1.0,"allowed":true}]},{"text":"cro","p":0.9891,"candidates":[{"text":"cro","p":0.9891,"allowed":true},{"text":"c","p":0.0064,"allowed":true},{"text":"cr","p":0.0035,"allowed":true}]},{"text":"issant","p":0.9999,"candidates":[{"text":"issant","p":0.9999,"allowed":true}]},{"text":"\"\n","p":0.9999,"candidates":[{"text":"\"\n","p":0.9999,"allowed":true}]},{"text":"   ","p":1.0,"candidates":[{"text":"   ","p":1.0,"allowed":true}]},{"text":" }\n","p":0.9896,"candidates":[{"text":" }\n","p":0.9896,"allowed":true},{"text":" },\n","p":0.0104,"allowed":true}]},{"text":" ","p":0.9998,"candidates":[{"text":" ","p":0.9998,"allowed":true}]},{"text":" ],\n","p":0.9955,"candidates":[{"text":" ],\n","p":0.9955,"allowed":true},{"text":" ]\n","p":0.0044,"allowed":true}]},{"text":" ","p":1.0,"candidates":[{"text":" ","p":1.0,"allowed":true}]},{"text":" \"","p":1.0,"candidates":[{"text":" \"","p":1.0,"allowed":true}]},{"text":"payment","p":0.984,"candidates":[{"text":"payment","p":0.984,"allowed":true},{"text":"method","p":0.008,"allowed":true},{"text":"payments","p":0.0018,"allowed":true},{"text":"paid","p":0.0011,"allowed":true},{"text":"methods","p":0.001,"allowed":true}]},{"text":"_method","p":0.9906,"candidates":[{"text":"_method","p":0.9906,"allowed":true},{"text":"\":","p":0.0078,"allowed":true}]},{"text":"\":","p":0.9999,"candidates":[{"text":"\":","p":0.9999,"allowed":true}]},{"text":" \"","p":0.9816,"candidates":[{"text":" \"","p":0.9816,"allowed":true},{"text":" {\n","p":0.0151,"allowed":true},{"text":" [\n","p":0.0015,"allowed":true}]},{"text":"card","p":0.9371,"candidates":[{"text":"card","p":0.9371,"allowed":true},{"text":"Card","p":0.0252,"allowed":true},{"text":"paid","p":0.0234,"allowed":true},{"text":"credit","p":0.0026,"allowed":true},{"text":"cash","p":0.0022,"allowed":true}]},{"text":"\"\n","p":0.9991,"candidates":[{"text":"\"\n","p":0.9991,"allowed":true}]},{"text":"}\n","p":1.0,"candidates":[{"text":"}\n","p":1.0,"allowed":true}]},{"text":"```","p":0.9956,"candidates":[{"text":"```","p":0.9956,"allowed":true},{"text":"``","p":0.0044,"allowed":true}]},{"text":"⏹ end","p":0.9998,"candidates":[{"text":"⏹ end","p":0.9998,"allowed":true}],"end":true}]},{"mode":"json","verdict":"shape","interventions":1,"steps":[{"text":"{\n","p":0.2053,"candidates":[{"text":"```","p":0.7879,"allowed":false},{"text":"{\n","p":0.2053,"allowed":true},{"text":"{\"","p":0.006,"allowed":true}],"wanted":"```"},{"text":" ","p":0.9592,"candidates":[{"text":" ","p":0.9592,"allowed":true},{"text":"   ","p":0.0396,"allowed":true}]},{"text":" \"","p":0.9994,"candidates":[{"text":" \"","p":0.9994,"allowed":true}]},{"text":"order","p":0.8949,"candidates":[{"text":"order","p":0.8949,"allowed":true},{"text":"return","p":0.088,"allowed":true},{"text":"Order","p":0.0073,"allowed":true},{"text":"item","p":0.0017,"allowed":true},{"text":"items","p":0.0016,"allowed":true}]},{"text":"_id","p":0.8736,"candidates":[{"text":"_id","p":0.8736,"allowed":true},{"text":"\":","p":0.0522,"allowed":true},{"text":"_number","p":0.0268,"allowed":true},{"text":"ID","p":0.0127,"allowed":true},{"text":"Id","p":0.0083,"allowed":true}]},{"text":"\":","p":0.9998,"candidates":[{"text":"\":","p":0.9998,"allowed":true}]},{"text":" \"","p":0.9753,"candidates":[{"text":" \"","p":0.9753,"allowed":true},{"text":" ","p":0.0191,"allowed":true},{"text":" null","p":0.0025,"allowed":true},{"text":" \"\",\n","p":0.0022,"allowed":true}]},{"text":"4","p":0.9655,"candidates":[{"text":"4","p":0.9655,"allowed":true},{"text":"1","p":0.0076,"allowed":true},{"text":"Order","p":0.0049,"allowed":true},{"text":"8","p":0.0026,"allowed":true},{"text":"5","p":0.0023,"allowed":true}]},{"text":"4","p":0.9952,"candidates":[{"text":"4","p":0.9952,"allowed":true},{"text":"5","p":0.0032,"allowed":true}]},{"text":"7","p":0.9983,"candidates":[{"text":"7","p":0.9983,"allowed":true},{"text":"8","p":0.001,"allowed":true}]},{"text":"1","p":0.996,"candidates":[{"text":"1","p":0.996,"allowed":true},{"text":"2","p":0.0029,"allowed":true}]},{"text":"\",\n","p":0.9976,"candidates":[{"text":"\",\n","p":0.9976,"allowed":true}]},{"text":" ","p":1.0,"candidates":[{"text":" ","p":1.0,"allowed":true}]},{"text":" \"","p":0.9998,"candidates":[{"text":" \"","p":0.9998,"allowed":true}]},{"text":"items","p":0.9803,"candidates":[{"text":"items","p":0.9803,"allowed":true},{"text":"item","p":0.0057,"allowed":true},{"text":"order","p":0.0054,"allowed":true},{"text":"total","p":0.0022,"allowed":true},{"text":"products","p":0.0017,"allowed":true}]},{"text":"\":","p":0.9302,"candidates":[{"text":"\":","p":0.9302,"allowed":true},{"text":"_with","p":0.0649,"allowed":true}]},{"text":" {\n","p":0.5286,"candidates":[{"text":" {\n","p":0.5286,"allowed":true},{"text":" [\n","p":0.4495,"allowed":true},{"text":" [\"","p":0.0064,"allowed":true},{"text":" [{\"","p":0.0057,"allowed":true},{"text":" [{\n","p":0.0041,"allowed":true}]},{"text":"   ","p":0.9999,"candidates":[{"text":"   ","p":0.9999,"allowed":true}]},{"text":" \"","p":0.9991,"candidates":[{"text":" \"","p":0.9991,"allowed":true}]},{"text":"coffee","p":0.9177,"candidates":[{"text":"coffee","p":0.9177,"allowed":true},{"text":"co","p":0.0441,"allowed":true},{"text":"Coffee","p":0.0096,"allowed":true},{"text":"2","p":0.0064,"allowed":true},{"text":"c","p":0.0047,"allowed":true}]},{"text":"\":","p":0.9991,"candidates":[{"text":"\":","p":0.9991,"allowed":true}]},{"text":" ","p":0.8846,"candidates":[{"text":" ","p":0.8846,"allowed":true},{"text":" {\n","p":0.0493,"allowed":true},{"text":" \"","p":0.0402,"allowed":true},{"text":" {\"","p":0.0161,"allowed":true},{"text":" {","p":0.0045,"allowed":true}]},{"text":"2","p":0.5107,"candidates":[{"text":"2","p":0.5107,"allowed":true},{"text":"1","p":0.4802,"allowed":true},{"text":"0","p":0.0063,"allowed":true},{"text":"3","p":0.0011,"allowed":true}]},{"text":",\n","p":0.9994,"candidates":[{"text":",\n","p":0.9994,"allowed":true}]},{"text":"   ","p":1.0,"candidates":[{"text":"   ","p":1.0,"allowed":true}]},{"text":" \"","p":1.0,"candidates":[{"text":" \"","p":1.0,"allowed":true}]},{"text":"cro","p":0.9865,"candidates":[{"text":"cro","p":0.9865,"allowed":true},{"text":"c","p":0.0071,"allowed":true},{"text":"cr","p":0.0046,"allowed":true},{"text":"Cro","p":0.001,"allowed":true}]},{"text":"issant","p":0.9997,"candidates":[{"text":"issant","p":0.9997,"allowed":true}]},{"text":"\":","p":1.0,"candidates":[{"text":"\":","p":1.0,"allowed":true}]},{"text":" ","p":0.9999,"candidates":[{"text":" ","p":0.9999,"allowed":true}]},{"text":"1","p":0.9996,"candidates":[{"text":"1","p":0.9996,"allowed":true}]},{"text":"\n","p":0.7979,"candidates":[{"text":"\n","p":0.7979,"allowed":true},{"text":",\n","p":0.202,"allowed":true}]},{"text":" ","p":1.0,"candidates":[{"text":" ","p":1.0,"allowed":true}]},{"text":" },\n","p":0.9985,"candidates":[{"text":" },\n","p":0.9985,"allowed":true},{"text":" }\n","p":0.0015,"allowed":true}]},{"text":" ","p":1.0,"candidates":[{"text":" ","p":1.0,"allowed":true}]},{"text":" \"","p":1.0,"candidates":[{"text":" \"","p":1.0,"allowed":true}]},{"text":"payment","p":0.9719,"candidates":[{"text":"payment","p":0.9719,"allowed":true},{"text":"payments","p":0.008,"allowed":true},{"text":"paid","p":0.0043,"allowed":true},{"text":"method","p":0.0022,"allowed":true},{"text":"total","p":0.002,"allowed":true}]},{"text":"_method","p":0.9828,"candidates":[{"text":"_method","p":0.9828,"allowed":true},{"text":"\":","p":0.0144,"allowed":true},{"text":"_methods","p":0.0011,"allowed":true}]},{"text":"\":","p":1.0,"candidates":[{"text":"\":","p":1.0,"allowed":true}]},{"text":" \"","p":0.9794,"candidates":[{"text":" \"","p":0.9794,"allowed":true},{"text":" {\n","p":0.0167,"allowed":true},{"text":" \"$","p":0.0014,"allowed":true},{"text":" [\n","p":0.0014,"allowed":true}]},{"text":"card","p":0.8464,"candidates":[{"text":"card","p":0.8464,"allowed":true},{"text":"Card","p":0.086,"allowed":true},{"text":"paid","p":0.0348,"allowed":true},{"text":"Pay","p":0.0053,"allowed":true},{"text":"credit","p":0.0052,"allowed":true}]},{"text":"\"\n","p":0.9956,"candidates":[{"text":"\"\n","p":0.9956,"allowed":true},{"text":"\",\n","p":0.0042,"allowed":true}]},{"text":"}","p":0.9998,"candidates":[{"text":"}","p":0.9998,"allowed":true}]},{"text":"⏹ end","p":1.0,"candidates":[{"text":"⏹ end","p":1.0,"allowed":true}],"end":true}]},{"mode":"schema","verdict":"match","interventions":4,"steps":[{"text":"{\n","p":0.2053,"candidates":[{"text":"```","p":0.7879,"allowed":false},{"text":"{\n","p":0.2053,"allowed":true},{"text":"{\"","p":0.006,"allowed":true}],"wanted":"```"},{"text":" ","p":0.9592,"candidates":[{"text":" ","p":0.9592,"allowed":true},{"text":"   ","p":0.0396,"allowed":true}]},{"text":" \"","p":0.9994,"candidates":[{"text":" \"","p":0.9994,"allowed":true}]},{"text":"order","p":0.8949,"candidates":[{"text":"order","p":0.8949,"allowed":true},{"text":"return","p":0.088,"allowed":false},{"text":"Order","p":0.0073,"allowed":false},{"text":"item","p":0.0017,"allowed":false},{"text":"items","p":0.0016,"allowed":false}]},{"text":"_id","p":0.8736,"candidates":[{"text":"_id","p":0.8736,"allowed":true},{"text":"\":","p":0.0522,"allowed":false},{"text":"_number","p":0.0268,"allowed":false},{"text":"ID","p":0.0127,"allowed":false},{"text":"Id","p":0.0083,"allowed":false}]},{"text":"\":","p":0.9998,"candidates":[{"text":"\":","p":0.9998,"allowed":true}]},{"text":" ","p":0.0191,"candidates":[{"text":" \"","p":0.9753,"allowed":false},{"text":" ","p":0.0191,"allowed":true},{"text":" null","p":0.0025,"allowed":false},{"text":" \"\",\n","p":0.0022,"allowed":false}],"wanted":" \""},{"text":"4","p":0.9647,"candidates":[{"text":"4","p":0.9647,"allowed":true},{"text":"1","p":0.0196,"allowed":true},{"text":"3","p":0.0038,"allowed":true},{"text":"2","p":0.0034,"allowed":true},{"text":"5","p":0.0031,"allowed":true}]},{"text":"4","p":0.9976,"candidates":[{"text":"4","p":0.9976,"allowed":true},{"text":"5","p":0.0014,"allowed":true}]},{"text":"7","p":0.9987,"candidates":[{"text":"7","p":0.9987,"allowed":true}]},{"text":"1","p":0.9969,"candidates":[{"text":"1","p":0.9969,"allowed":true},{"text":"2","p":0.0021,"allowed":true}]},{"text":",\n","p":0.9992,"candidates":[{"text":",\n","p":0.9992,"allowed":true}]},{"text":" ","p":1.0,"candidates":[{"text":" ","p":1.0,"allowed":true}]},{"text":" \"","p":0.9998,"candidates":[{"text":" \"","p":0.9998,"allowed":true}]},{"text":"items","p":0.9777,"candidates":[{"text":"items","p":0.9777,"allowed":true},{"text":"item","p":0.0057,"allowed":true},{"text":"order","p":0.0057,"allowed":false},{"text":"total","p":0.0026,"allowed":false},{"text":"products","p":0.0022,"allowed":false}]},{"text":"\":","p":0.9509,"candidates":[{"text":"\":","p":0.9509,"allowed":true},{"text":"_with","p":0.0453,"allowed":false}]},{"text":" [\n","p":0.3569,"candidates":[{"text":" {\n","p":0.614,"allowed":false},{"text":" [\n","p":0.3569,"allowed":true},{"text":" [\"","p":0.0089,"allowed":false},{"text":" [{\"","p":0.0076,"allowed":true},{"text":" {\"","p":0.0054,"allowed":false}],"wanted":" {\n"},{"text":"   ","p":1.0,"candidates":[{"text":"   ","p":1.0,"allowed":true}]},{"text":" {\n","p":0.9161,"candidates":[{"text":" {\n","p":0.9161,"allowed":true},{"text":" {\"","p":0.0493,"allowed":true},{"text":" {","p":0.0335,"allowed":true}]},{"text":"     ","p":0.9999,"candidates":[{"text":"     ","p":0.9999,"allowed":true}]},{"text":" \"","p":1.0,"candidates":[{"text":" \"","p":1.0,"allowed":true}]},{"text":"name","p":0.197,"candidates":[{"text":"quantity","p":0.3161,"allowed":false},{"text":"item","p":0.2328,"allowed":false},{"text":"product","p":0.2132,"allowed":false},{"text":"name","p":0.197,"allowed":true},{"text":"quant","p":0.0039,"allowed":false}],"wanted":"quantity"},{"text":"\":","p":1.0,"candidates":[{"text":"\":","p":1.0,"allowed":true}]},{"text":" \"","p":0.9999,"candidates":[{"text":" \"","p":0.9999,"allowed":true}]},{"text":"coffee","p":0.6242,"candidates":[{"text":"coffee","p":0.6242,"allowed":true},{"text":"Coffee","p":0.3019,"allowed":true},{"text":"2","p":0.0401,"allowed":true},{"text":"co","p":0.019,"allowed":true},{"text":"C","p":0.0026,"allowed":true}]},{"text":"\",\n","p":0.9995,"candidates":[{"text":"\",\n","p":0.9995,"allowed":true}]},{"text":"     ","p":1.0,"candidates":[{"text":"     ","p":1.0,"allowed":true}]},{"text":" \"","p":1.0,"candidates":[{"text":" \"","p":1.0,"allowed":true}]},{"text":"quantity","p":0.9905,"candidates":[{"text":"quantity","p":0.9905,"allowed":true},{"text":"amount","p":0.0035,"allowed":false},{"text":"quant","p":0.0012,"allowed":true},{"text":"price","p":0.0011,"allowed":false}]},{"text":"\":","p":0.9999,"candidates":[{"text":"\":","p":0.9999,"allowed":true}]},{"text":" ","p":0.9282,"candidates":[{"text":" ","p":0.9282,"allowed":true},{"text":" \"","p":0.0715,"allowed":false}]},{"text":"2","p":0.9654,"candidates":[{"text":"2","p":0.9654,"allowed":true},{"text":"1","p":0.034,"allowed":true}]},{"text":"\n","p":0.7598,"candidates":[{"text":"\n","p":0.7598,"allowed":true},{"text":",\n","p":0.2401,"allowed":false}]},{"text":"   ","p":1.0,"candidates":[{"text":"   ","p":1.0,"allowed":true}]},{"text":" },\n","p":0.9994,"candidates":[{"text":" },\n","p":0.9994,"allowed":true}]},{"text":"   ","p":1.0,"candidates":[{"text":"   ","p":1.0,"allowed":true}]},{"text":" {\n","p":0.9999,"candidates":[{"text":" {\n","p":0.9999,"allowed":true}]},{"text":"     ","p":1.0,"candidates":[{"text":"     ","p":1.0,"allowed":true}]},{"text":" \"","p":1.0,"candidates":[{"text":" \"","p":1.0,"allowed":true}]},{"text":"name","p":0.9999,"candidates":[{"text":"name","p":0.9999,"allowed":true}]},{"text":"\":","p":1.0,"candidates":[{"text":"\":","p":1.0,"allowed":true}]},{"text":" \"","p":1.0,"candidates":[{"text":" \"","p":1.0,"allowed":true}]},{"text":"cro","p":0.9869,"candidates":[{"text":"cro","p":0.9869,"allowed":true},{"text":"c","p":0.0062,"allowed":true},{"text":"cr","p":0.0033,"allowed":true},{"text":"Cro","p":0.0028,"allowed":true}]},{"text":"issant","p":0.9998,"candidates":[{"text":"issant","p":0.9998,"allowed":true}]},{"text":"\",\n","p":1.0,"candidates":[{"text":"\",\n","p":1.0,"allowed":true}]},{"text":"     ","p":1.0,"candidates":[{"text":"     ","p":1.0,"allowed":true}]},{"text":" \"","p":1.0,"candidates":[{"text":" \"","p":1.0,"allowed":true}]},{"text":"quantity","p":0.9999,"candidates":[{"text":"quantity","p":0.9999,"allowed":true}]},{"text":"\":","p":1.0,"candidates":[{"text":"\":","p":1.0,"allowed":true}]},{"text":" ","p":1.0,"candidates":[{"text":" ","p":1.0,"allowed":true}]},{"text":"1","p":0.9997,"candidates":[{"text":"1","p":0.9997,"allowed":true}]},{"text":"\n","p":1.0,"candidates":[{"text":"\n","p":1.0,"allowed":true}]},{"text":"   ","p":1.0,"candidates":[{"text":"   ","p":1.0,"allowed":true}]},{"text":" }\n","p":0.9887,"candidates":[{"text":" }\n","p":0.9887,"allowed":true},{"text":" },\n","p":0.0113,"allowed":true}]},{"text":" ","p":1.0,"candidates":[{"text":" ","p":1.0,"allowed":true}]},{"text":" ],\n","p":0.9985,"candidates":[{"text":" ],\n","p":0.9985,"allowed":true},{"text":" ]\n","p":0.0014,"allowed":true}]},{"text":" ","p":1.0,"candidates":[{"text":" ","p":1.0,"allowed":true}]},{"text":" \"","p":1.0,"candidates":[{"text":" \"","p":1.0,"allowed":true}]},{"text":"payment","p":0.9818,"candidates":[{"text":"payment","p":0.9818,"allowed":true},{"text":"payments","p":0.0071,"allowed":false},{"text":"method","p":0.0028,"allowed":false},{"text":"paid","p":0.0018,"allowed":false},{"text":"methods","p":0.0012,"allowed":false}]},{"text":"_method","p":0.9877,"candidates":[{"text":"_method","p":0.9877,"allowed":true},{"text":"\":","p":0.01,"allowed":false}]},{"text":"\":","p":0.9999,"candidates":[{"text":"\":","p":0.9999,"allowed":true}]},{"text":" \"","p":0.9896,"candidates":[{"text":" \"","p":0.9896,"allowed":true},{"text":" {\n","p":0.0075,"allowed":false},{"text":" [\n","p":0.001,"allowed":false}]},{"text":"card","p":0.9375,"candidates":[{"text":"card","p":0.9375,"allowed":true},{"text":"paid","p":0.0317,"allowed":false},{"text":"Card","p":0.0165,"allowed":false},{"text":"cash","p":0.0026,"allowed":true},{"text":"credit","p":0.0023,"allowed":false}]},{"text":"\"\n","p":0.997,"candidates":[{"text":"\"\n","p":0.997,"allowed":true},{"text":"\",\n","p":0.0025,"allowed":false}]},{"text":"}","p":0.9998,"candidates":[{"text":"}","p":0.9998,"allowed":true}]},{"text":"⏹ end","p":1.0,"candidates":[{"text":"⏹ end","p":1.0,"allowed":true}],"end":true}]}]};
+
+const el = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+};
+const visible = t => t.startsWith("⏹") ? t : t.replace(/ /g, "·").replace(/\n/g, "↵").replace(/\t/g, "→");
+const pct = p => p >= 0.995 ? "100%" : p < 0.001 ? "<0.1%" : (p * 100).toFixed(p < 0.1 ? 1 : 0) + "%";
+
+document.getElementById("prompt").textContent = `“${TRACE.prompt}”`;
+
+// Schema as an indented outline; keys are tagged so the live key can light up.
+function schemaTree(s) {
+  const ol = el("ol");
+  for (const [key, sub] of Object.entries(s.properties || {})) {
+    const li = el("li");
+    const k = el("span", "key", key);
+    k.dataset.key = key;
+    li.append(k, el("span", "type", " " + describe(sub)));
+    const inner = sub.type === "array" ? sub.items : sub;
+    if (inner && inner.properties) li.append(schemaTree(inner));
+    ol.append(li);
+  }
+  return ol;
+}
+function describe(s) {
+  if (s.enum) return "one of " + s.enum.join(", ");
+  if (s.type === "array") return "list of " + (s.items ? (s.items.properties ? "objects" : describe(s.items) + "s") : "anything");
+  if (s.type === "object" && !s.properties) return "any object";
+  return s.type || "anything";
+}
+document.getElementById("schema").append(schemaTree(TRACE.schema));
+
+const lanes = TRACE.runs.map(run => {
+  const node = document.querySelector(`.lane[data-mode="${run.mode}"]`);
+  return { run, node, out: node.querySelector(".out"), cands: node.querySelector(".cands"), verdict: node.querySelector(".verdict"), shown: 0 };
+});
+const total = Math.max(...lanes.map(l => l.run.steps.length));
+const scrub = document.getElementById("scrub");
+scrub.max = total;
+
+function showCandidates(lane, i, inspecting) {
+  const step = lane.run.steps[i];
+  lane.cands.replaceChildren();
+  if (!step) return;
+  const head = step.wanted
+    ? `Token ${i + 1}: the model's favourite was blocked`
+    : `Token ${i + 1}: the model's own pick`;
+  lane.cands.append(el("p", null, inspecting ? head + " (hovered)" : head));
+  for (const c of step.candidates) {
+    const row = el("div", "cand" + (c.allowed ? "" : " blocked") + (c.text === step.text ? " chosen" : ""));
+    const bar = el("span", "bar");
+    const fill = el("i");
+    fill.style.width = (c.p * 100).toFixed(1) + "%";
+    bar.append(fill);
+    row.append(el("span", "t", visible(c.text)), bar, el("span", "pct", pct(c.p)));
+    lane.cands.append(row);
+  }
+  if (!step.candidates.some(c => c.text === step.text)) {
+    const row = el("div", "cand chosen");
+    row.append(el("span", "t", visible(step.text)), el("span", "bar"), el("span", "pct", pct(step.p)));
+    lane.cands.append(row);
+  }
+}
+
+function tokenNode(lane, step, i) {
+  let node;
+  if (step.wanted) {
+    // Show what the model wanted above what it was allowed to write.
+    const nl = step.text.indexOf("\n");
+    const head = nl === -1 ? step.text : step.text.slice(0, nl);
+    const tail = nl === -1 ? "" : step.text.slice(nl);
+    const ruby = el("ruby");
+    ruby.append(el("span", "got", head.trim() === "" ? visible(head || step.text) : head), el("rt", null, visible(step.wanted)));
+    node = el("span", "tok");
+    node.append(ruby, tail);
+  } else {
+    node = el("span", "tok", step.text);
+  }
+  node.addEventListener("mouseenter", () => { node.classList.add("inspect"); showCandidates(lane, i, true); });
+  node.addEventListener("mouseleave", () => { node.classList.remove("inspect"); showCandidates(lane, lane.shown - 1, false); });
+  return node;
+}
+
+const VERDICTS = {
+  invalid: "Not valid JSON",
+  shape: "Valid JSON, wrong shape",
+  match: "Matches the schema",
+};
+
+function render(pos, animate) {
+  for (const lane of lanes) {
+    const steps = lane.run.steps;
+    const target = Math.min(pos, steps.length);
+    if (target < lane.shown) {
+      lane.out.replaceChildren();
+      lane.shown = 0;
+    }
+    lane.out.querySelector(".caret")?.remove();
+    let flashed = false;
+    while (lane.shown < target) {
+      const i = lane.shown++;
+      const step = steps[i];
+      if (step.end) continue;
+      const node = tokenNode(lane, step, i);
+      if (animate) node.classList.add("new");
+      lane.out.append(node);
+      flashed ||= animate && !!step.wanted;
+    }
+    if (flashed) {
+      lane.node.classList.remove("flash");
+      void lane.node.offsetWidth;
+      lane.node.classList.add("flash");
+    }
+    const done = lane.shown >= steps.length;
+    if (!done) lane.out.append(el("span", "caret"));
+    showCandidates(lane, lane.shown - 1, false);
+    lane.verdict.className = "verdict" + (done ? " " + lane.run.verdict : "");
+    lane.verdict.replaceChildren();
+    if (done) {
+      const n = lane.run.interventions;
+      lane.verdict.append(VERDICTS[lane.run.verdict], el("small", null,
+        lane.run.mode === "free" ? "Nothing was ever blocked" : `The mask stepped in ${n} time${n === 1 ? "" : "s"}`));
+    }
+  }
+  // Light up the key the schema run is writing.
+  const schemaLane = lanes.find(l => l.run.mode === "schema");
+  const text = schemaLane.run.steps.slice(0, schemaLane.shown).map(s => s.end ? "" : s.text).join("");
+  const keys = [...text.matchAll(/"([^"\\]+)"\s*:/g)];
+  const current = schemaLane.shown < schemaLane.run.steps.length && keys.length ? keys[keys.length - 1][1] : null;
+  document.querySelectorAll(".schema .key").forEach(k => k.classList.toggle("now", k.dataset.key === current));
+
+  scrub.value = pos;
+  document.getElementById("count").textContent = `Token ${pos} of ${total}`;
+}
+
+let pos = 0, timer = null;
+const playBtn = document.getElementById("play");
+const speed = document.getElementById("speed");
+function go(p, animate = false) { pos = Math.max(0, Math.min(total, p)); render(pos, animate); }
+function stop() { clearInterval(timer); timer = null; playBtn.textContent = pos >= total ? "Replay" : "Play"; }
+function play() {
+  if (pos >= total) go(0);
+  playBtn.textContent = "Pause";
+  timer = setInterval(() => { go(pos + 1, true); if (pos >= total) stop(); }, +speed.value);
+}
+playBtn.onclick = () => timer ? stop() : play();
+document.getElementById("back").onclick = () => { stop(); go(pos - 1); };
+document.getElementById("fwd").onclick = () => { stop(); go(pos + 1, true); };
+scrub.oninput = () => { stop(); go(+scrub.value); };
+speed.onchange = () => { if (timer) { stop(); play(); } };
+document.addEventListener("keydown", e => {
+  if (e.target.closest("button, select, input")) return;
+  if (e.key === " ") { e.preventDefault(); timer ? stop() : play(); }
+  if (e.key === "ArrowRight") { stop(); go(pos + 1, true); }
+  if (e.key === "ArrowLeft") { stop(); go(pos - 1); }
+});
+go(0);
+</script>
+</body>
+</html>

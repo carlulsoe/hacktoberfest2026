@@ -60,6 +60,17 @@ Benchmark on bluefin-1, greedy:
 
 The free model mostly fails by wrapping its JSON in a code fence. JSON mode gets the syntax right but not the shape (`"order_id": "4471"`, `items` as an object instead of an array).
 
+### Visual demo
+
+`demo/order.html` is a self-contained replay of a real run: the same prompt decoded free, as any JSON, and against `schemas/order.json`, side by side and token by token. Wherever the mask overrode the model, the token the model wanted is struck out above the one it was allowed to write. Open it in a browser (no model needed). Space plays, ← → step, and hovering a token shows its candidates.
+
+Make one for any prompt and schema:
+
+```sh
+./target/release/jsonc --schema schemas/order.json --demo demo/order.html \
+  "Order #4471: 2x coffee, 1x croissant, paid by card. Return order id, items with quantities, and payment method."
+```
+
 ## Tests
 
 ```sh

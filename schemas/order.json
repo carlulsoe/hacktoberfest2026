@@ -1,0 +1,17 @@
+{
+  "type": "object",
+  "properties": {
+    "order_id": { "type": "integer" },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "quantity": { "type": "integer" }
+        }
+      }
+    },
+    "payment_method": { "enum": ["card", "cash", "mobile"] }
+  }
+}
